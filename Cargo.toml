@@ -3,11 +3,22 @@ name = "nodemoduleskiller"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Find and delete node_modules and friends — a Rust port of npkill"
+authors = ["xuanphamdev"]
+description = "Find and delete node_modules and friends from a fast terminal UI — a Rust port of npkill"
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/xuanphamdev/nodemoduleskiller"
+homepage = "https://github.com/xuanphamdev/nodemoduleskiller"
+documentation = "https://docs.rs/nodemoduleskiller"
 keywords = ["cli", "node-modules", "disk-cleanup", "tui", "developer-tools"]
 categories = ["command-line-utilities", "filesystem"]
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "rustfmt.toml",
+]
 
 [[bin]]
 name = "nmk"
