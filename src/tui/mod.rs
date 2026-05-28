@@ -217,6 +217,13 @@ fn map_key(k: KeyEvent, mode: &Mode) -> Action {
             _ => Action::Noop,
         };
     }
+    // Lock the keyboard while a delete is in flight. Only Ctrl-C (handled
+    // above) can exit. We don't allow cancelling mid-delete because
+    // `std::fs::remove_dir_all` has no clean abort path — half-deleted
+    // trees would be worse than waiting.
+    if matches!(mode, Mode::Deleting(_)) {
+        return Action::Noop;
+    }
     // Browse mode.
     match k.code {
         KeyCode::Up | KeyCode::Char('k') => Action::Up,

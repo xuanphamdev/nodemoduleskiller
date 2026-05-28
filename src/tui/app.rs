@@ -21,6 +21,10 @@ pub enum Mode {
     Browse,
     /// Awaiting Y/N on deleting the row at this cursor index.
     Confirm(usize),
+    /// Delete confirmed; waiting for the filesystem operation to complete.
+    /// The modal stays open with a spinner so the user knows the app is
+    /// working — large `node_modules` trees can take several seconds.
+    Deleting(usize),
 }
 
 /// All UI-visible state.
@@ -177,10 +181,13 @@ impl AppState {
             }
             Action::ConfirmYes => match self.mode.clone() {
                 Mode::Confirm(idx) => {
-                    self.mode = Mode::Browse;
                     if let Some(r) = self.results.get(idx) {
+                        // Switch to Deleting so the modal stays open with a
+                        // spinner until `record_delete_outcome` lands.
+                        self.mode = Mode::Deleting(idx);
                         Effect::DeleteFolder { index: idx, path: r.path.clone() }
                     } else {
+                        self.mode = Mode::Browse;
                         Effect::None
                     }
                 }
@@ -296,16 +303,34 @@ impl AppState {
     }
 
     /// Update a row after a delete attempt completes.
+    ///
+    /// - **Real-delete success**: remove the row entirely so the user sees
+    ///   the freed space drop off the list. Cursor is clamped if needed.
+    /// - **Dry-run success**: keep the row but mark `deleted` so the
+    ///   strike-through ✗ icon shows; the user can still see what would
+    ///   have been removed.
+    /// - **Failure**: keep the row exactly as it was, surface the error
+    ///   message in the status bar.
+    ///
+    /// Always closes the modal (Mode → Browse) so the user can keep going.
     pub fn record_delete_outcome(&mut self, index: usize, success: bool, error: Option<String>) {
-        if let Some(row) = self.results.get_mut(index) {
-            row.deleted = success;
-            if let Some(e) = error {
-                self.last_message = Some(format!("delete failed: {e}"));
-            } else if self.dry_run {
+        self.mode = Mode::Browse;
+        if success {
+            if self.dry_run {
+                if let Some(row) = self.results.get_mut(index) {
+                    row.deleted = true;
+                }
                 self.last_message = Some("(dry-run) would have deleted".into());
-            } else {
+            } else if index < self.results.len() {
+                self.results.remove(index);
+                if !self.results.is_empty() && self.cursor >= self.results.len() {
+                    self.cursor = self.results.len() - 1;
+                }
                 self.last_message = Some("deleted".into());
             }
+        } else {
+            let msg = error.unwrap_or_else(|| "unknown error".into());
+            self.last_message = Some(format!("delete failed: {msg}"));
         }
     }
 
@@ -360,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_flow_yes_emits_effect_and_returns_to_browse() {
+    fn delete_flow_yes_emits_effect_and_stays_in_deleting_until_outcome() {
         let mut s = fresh_state();
         push(&mut s, "/a/node_modules");
         s.apply(Action::RequestDelete);
@@ -373,7 +398,61 @@ mod tests {
             }
             other => panic!("expected DeleteFolder, got {other:?}"),
         }
+        // Modal stays open with the spinner while the FS op runs.
+        assert_eq!(s.mode, Mode::Deleting(0));
+        // Outcome arrives — modal closes, real-delete success removes the row.
+        s.record_delete_outcome(0, true, None);
         assert_eq!(s.mode, Mode::Browse);
+        assert!(s.results.is_empty(), "real-delete success should drop the row");
+        assert_eq!(s.last_message.as_deref(), Some("deleted"));
+    }
+
+    #[test]
+    fn delete_failure_keeps_row_and_surfaces_error() {
+        let mut s = fresh_state();
+        push(&mut s, "/a/node_modules");
+        s.apply(Action::RequestDelete);
+        s.apply(Action::ConfirmYes);
+        assert_eq!(s.mode, Mode::Deleting(0));
+        s.record_delete_outcome(0, false, Some("permission denied".into()));
+        assert_eq!(s.mode, Mode::Browse);
+        assert_eq!(s.results.len(), 1, "failed delete must leave the row visible");
+        assert!(
+            s.last_message.as_deref().unwrap().contains("permission denied"),
+            "got {:?}",
+            s.last_message
+        );
+    }
+
+    #[test]
+    fn dry_run_keeps_row_and_marks_deleted_visually() {
+        let mut s = fresh_state();
+        s.dry_run = true;
+        push(&mut s, "/a/node_modules");
+        s.apply(Action::RequestDelete);
+        s.apply(Action::ConfirmYes);
+        s.record_delete_outcome(0, true, None);
+        assert_eq!(s.results.len(), 1, "dry-run never deletes; row stays");
+        assert!(s.results[0].deleted, "dry-run still marks the row visually");
+        assert!(s.last_message.as_deref().unwrap().contains("dry-run"));
+    }
+
+    #[test]
+    fn cursor_clamps_after_removing_last_row() {
+        let mut s = fresh_state();
+        push(&mut s, "/a/node_modules");
+        push(&mut s, "/b/node_modules");
+        push(&mut s, "/c/node_modules");
+        // Move cursor to the last row.
+        s.apply(Action::Down);
+        s.apply(Action::Down);
+        assert_eq!(s.cursor, 2);
+        // Delete it.
+        s.apply(Action::RequestDelete);
+        s.apply(Action::ConfirmYes);
+        s.record_delete_outcome(2, true, None);
+        assert_eq!(s.results.len(), 2);
+        assert_eq!(s.cursor, 1, "cursor should clamp to the new last row");
     }
 
     #[test]
@@ -395,12 +474,16 @@ mod tests {
     }
 
     #[test]
-    fn cannot_redelete_a_deleted_row() {
+    fn cannot_redelete_a_dryrun_deleted_row() {
+        // Real-delete now removes the row entirely; the only way a row can
+        // be visible AND flagged `deleted` is in dry-run mode.
         let mut s = fresh_state();
+        s.dry_run = true;
         push(&mut s, "/a/node_modules");
         s.record_delete_outcome(0, true, None);
+        assert!(s.results[0].deleted, "precondition: dry-run leaves row marked");
         s.apply(Action::RequestDelete);
-        assert_eq!(s.mode, Mode::Browse, "should not open confirm for deleted row");
+        assert_eq!(s.mode, Mode::Browse, "should not open confirm for an already-marked row");
     }
 
     #[test]

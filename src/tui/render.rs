@@ -61,9 +61,16 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState) {
     draw_table(frame, chunks[1], state);
     draw_status(frame, chunks[2], state);
 
-    if let Mode::Confirm(idx) = &state.mode {
-        let row = state.results.get(*idx);
-        draw_confirm_modal(frame, area, state, row);
+    match &state.mode {
+        Mode::Confirm(idx) => {
+            let row = state.results.get(*idx);
+            draw_confirm_modal(frame, area, state, row);
+        }
+        Mode::Deleting(idx) => {
+            let row = state.results.get(*idx);
+            draw_deleting_modal(frame, area, state, row);
+        }
+        Mode::Browse => {}
     }
 }
 
@@ -291,6 +298,13 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         Mode::Confirm(_) => {
             vec![key_span(" y "), label_span("delete  "), key_span("n/Esc "), label_span("cancel")]
         }
+        Mode::Deleting(_) => vec![
+            Span::styled(
+                format!(" {} deleting…", spinner_frame()),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+            label_span("   keys locked until done"),
+        ],
     };
     if let Some(msg) = &state.last_message {
         spans.push(Span::raw("    "));
@@ -389,6 +403,64 @@ fn draw_confirm_modal(
         ),
         Span::styled(" cancel", Style::default().fg(Color::DarkGray)),
     ]));
+
+    let block = Block::default()
+        .title(Span::styled(title, title_style))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(title_style);
+    let p = Paragraph::new(body).alignment(Alignment::Center).block(block);
+    frame.render_widget(p, modal);
+}
+
+/// Loading overlay shown while a delete is in flight. Same double-border
+/// shape as the confirm modal — only the contents change — so the user
+/// sees the modal "morph" smoothly rather than blink off.
+fn draw_deleting_modal(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    row: Option<&FolderResult>,
+) {
+    let mut width = area.width.saturating_mul(3) / 5;
+    width = width.clamp(50, area.width.saturating_sub(4).max(50));
+    let height = 10u16.min(area.height);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let modal = Rect { x, y, width, height };
+
+    frame.render_widget(Clear, modal);
+
+    let path = row.map(|r| r.path.display().to_string()).unwrap_or_else(|| "<missing>".into());
+    let size = row.and_then(|r| r.size_bytes).map(human_bytes).unwrap_or_else(|| "—".into());
+
+    let accent_color = if state.dry_run { Color::Magenta } else { Color::Yellow };
+    let title_style = Style::default().fg(accent_color).add_modifier(Modifier::BOLD);
+    let title = format!(" {} DELETING…  ", spinner_frame());
+
+    let body = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            path,
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("removing ", Style::default().fg(Color::DarkGray)),
+            Span::styled(size, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(" — this may take a moment", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(if state.dry_run {
+            Span::styled("(dry-run — no filesystem mutation)", Style::default().fg(Color::Magenta))
+        } else {
+            Span::styled(
+                "do not interrupt; large trees can take seconds",
+                Style::default().fg(Color::DarkGray),
+            )
+        }),
+    ];
 
     let block = Block::default()
         .title(Span::styled(title, title_style))
