@@ -35,20 +35,20 @@ use crate::tui::app::{AppState, Mode};
 /// Braille-pattern spinner frames (smoother than ASCII /-\|).
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// "NMK" rendered in ANSI Shadow figlet font. Used as a splash logo while
+/// "CFT" rendered in ANSI Shadow figlet font. Used as a splash logo while
 /// the scan is still empty.
 const LOGO: &[&str] = &[
-    "███╗   ██╗███╗   ███╗██╗  ██╗",
-    "████╗  ██║████╗ ████║██║ ██╔╝",
-    "██╔██╗ ██║██╔████╔██║█████╔╝ ",
-    "██║╚██╗██║██║╚██╔╝██║██╔═██╗ ",
-    "██║ ╚████║██║ ╚═╝ ██║██║  ██╗",
-    "╚═╝  ╚═══╝╚═╝     ╚═╝╚═╝  ╚═╝",
+    " ██████╗███████╗████████╗",
+    "██╔════╝██╔════╝╚══██╔══╝",
+    "██║     █████╗     ██║   ",
+    "██║     ██╔══╝     ██║   ",
+    "╚██████╗██║        ██║   ",
+    " ╚═════╝╚═╝        ╚═╝   ",
 ];
 
 /// Width (in display columns) of the LOGO above. All ANSI-shadow chars are
 /// single-cell, so this equals the character count of the longest line.
-const LOGO_WIDTH: u16 = 29;
+const LOGO_WIDTH: u16 = 25;
 
 pub fn draw(frame: &mut Frame<'_>, state: &AppState) {
     let area = frame.area();
